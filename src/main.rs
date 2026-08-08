@@ -1,3 +1,4 @@
+mod aircraft;
 mod app;
 mod core;
 mod sim;

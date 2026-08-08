@@ -2,10 +2,12 @@
 //! a time. Aircraft/crew/world state gets added here as those subsystems
 //! land — for now this just proves the tick → event flow works end to end.
 
+use crate::aircraft::controls::ControlInputs;
+use crate::aircraft::state::AircraftState;
 use crate::core::event::Event;
 use crate::core::event_bus::EventBus;
 use crate::core::tick::FixedTimestep;
-use crate::core::time::SimClock;
+use crate::core::time::{SimClock, TICK_DURATION};
 use std::time::Duration;
 
 pub struct Simulation {
@@ -13,6 +15,11 @@ pub struct Simulation {
     event_bus: EventBus,
     timestep: FixedTimestep,
     started: bool,
+    aircraft: AircraftState,
+    /// No parser (#4) or FO (#7) writes to this yet -- it stays at
+    /// `ControlInputs::default()` (cruise trim), which is exactly why
+    /// `AircraftState::cruise()` is defined to be in equilibrium with it.
+    controls: ControlInputs,
 }
 
 impl Simulation {
@@ -22,11 +29,17 @@ impl Simulation {
             event_bus: EventBus::new(),
             timestep: FixedTimestep::new(),
             started: false,
+            aircraft: AircraftState::cruise(),
+            controls: ControlInputs::default(),
         }
     }
 
     pub fn clock(&self) -> &SimClock {
         &self.clock
+    }
+
+    pub fn aircraft(&self) -> &AircraftState {
+        &self.aircraft
     }
 
     pub fn event_bus(&mut self) -> &mut EventBus {
@@ -43,6 +56,7 @@ impl Simulation {
             self.started = true;
         }
         self.clock.tick();
+        self.aircraft.integrate(&self.controls, TICK_DURATION.as_secs_f64());
         self.event_bus.publish(Event::Tick { at: self.clock.now() });
     }
 

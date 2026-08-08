@@ -1,9 +1,8 @@
-//! Vertical speed indicator. Stubbed until issue #6 (aircraft state)
-//! provides a real climb/descent rate to render.
+//! Vertical speed readout line, composed into [`super::pfd`] rather than
+//! shown as its own panel -- see the note in `altimeter.rs`.
 
-use ratatui::widgets::Paragraph;
+use ratatui::text::{Line, Span};
 
-#[allow(dead_code)] // not composed into pfd::widget() yet -- pfd itself is still a placeholder
-pub fn widget() -> Paragraph<'static> {
-    super::placeholder("VSI", "awaiting aircraft state (issue #6)")
+pub fn line(vertical_speed_fpm: f64) -> Line<'static> {
+    Line::from(vec![Span::raw("V/S   "), Span::raw(format!("{vertical_speed_fpm:>+6.0} fpm"))])
 }

@@ -1,9 +1,9 @@
-//! Altimeter tape. Stubbed until issue #6 (aircraft state) provides a
-//! real altitude to render.
+//! Altitude readout line, composed into [`super::pfd`] rather than shown
+//! as its own panel -- the layout only allocates one region for the PFD,
+//! matching the roadmap's mockup.
 
-use ratatui::widgets::Paragraph;
+use ratatui::text::{Line, Span};
 
-#[allow(dead_code)] // not composed into pfd::widget() yet -- pfd itself is still a placeholder
-pub fn widget() -> Paragraph<'static> {
-    super::placeholder("ALT", "awaiting aircraft state (issue #6)")
+pub fn line(altitude_ft: f64) -> Line<'static> {
+    Line::from(vec![Span::raw("ALT   "), Span::raw(format!("{altitude_ft:>6.0} ft"))])
 }

@@ -121,6 +121,7 @@ impl App {
         let log_entries: Vec<String> = log.iter().cloned().collect();
         let state = ScreenState {
             tick_count: self.sim.clock().tick_count(),
+            aircraft: self.sim.aircraft(),
             log_entries: &log_entries,
             command_input: &self.command_input,
         };
