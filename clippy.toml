@@ -1,0 +1,3 @@
+# Placeholder for future lint tuning (e.g. cognitive-complexity-threshold
+# once sim/aircraft update logic grows). Empty for now — default lints
+# are enforced via `-D warnings` in CI.
