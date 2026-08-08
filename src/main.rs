@@ -1,6 +1,7 @@
 mod aircraft;
 mod app;
 mod core;
+mod parser;
 mod sim;
 mod ui;
 

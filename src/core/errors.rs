@@ -6,12 +6,11 @@
 
 use std::fmt;
 
-#[derive(Debug)]
-#[allow(dead_code)] // stub type ahead of issue #4/#7 call sites
+#[derive(Debug, Clone, PartialEq)]
 pub enum SimError {
-    /// A command referenced something that doesn't exist yet (e.g. a task
-    /// id the FO queue doesn't know about). Placeholder until the parser
-    /// and FO queue issues land and give this real call sites.
+    /// A command referenced something invalid: unknown command name,
+    /// wrong number of arguments, a non-numeric value, or a value outside
+    /// the command's allowed range. Constructed by `parser::parse`.
     InvalidCommand(String),
 }
 

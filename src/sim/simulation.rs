@@ -4,6 +4,7 @@
 
 use crate::aircraft::controls::ControlInputs;
 use crate::aircraft::state::AircraftState;
+use crate::core::command::Command;
 use crate::core::event::Event;
 use crate::core::event_bus::EventBus;
 use crate::core::tick::FixedTimestep;
@@ -40,6 +41,18 @@ impl Simulation {
 
     pub fn aircraft(&self) -> &AircraftState {
         &self.aircraft
+    }
+
+    /// Apply a parsed player command by updating the control targets the
+    /// aircraft chases on subsequent ticks. Takes effect starting next
+    /// tick, not instantly -- `AircraftState::integrate` still applies
+    /// its usual first-order response toward the new target.
+    pub fn apply_command(&mut self, command: Command) {
+        match command {
+            Command::SetPitch(deg) => self.controls.pitch_target_deg = deg,
+            Command::SetBank(deg) => self.controls.bank_target_deg = deg,
+            Command::SetThrust(percent) => self.controls.thrust_target_percent = percent,
+        }
     }
 
     pub fn event_bus(&mut self) -> &mut EventBus {
@@ -106,6 +119,19 @@ mod tests {
 
         assert_eq!(sim.clock().tick_count(), 3);
         assert_eq!(*ticks_seen.lock().unwrap(), 3);
+    }
+
+    #[test]
+    fn apply_command_updates_control_targets_and_aircraft_responds_next_ticks() {
+        let mut sim = Simulation::new();
+        let initial_altitude = sim.aircraft().altitude_ft;
+
+        sim.apply_command(Command::SetPitch(7.5));
+        for _ in 0..50 {
+            sim.tick();
+        }
+
+        assert!(sim.aircraft().altitude_ft > initial_altitude);
     }
 
     #[test]

@@ -4,7 +4,9 @@
 //! "thing a person looks at" -- nothing simulation-specific should leak
 //! in here beyond what [`crate::sim::simulation::Simulation`] exposes.
 
+use crate::core::command::Command;
 use crate::core::event::Event;
+use crate::parser;
 use crate::sim::simulation::Simulation;
 use crate::ui::screen::{self, ScreenState};
 use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers};
@@ -84,10 +86,16 @@ impl App {
             KeyCode::Esc => self.should_quit = true,
             KeyCode::Enter => {
                 if !self.command_input.is_empty() {
-                    self.push_log(format!("> {}", self.command_input));
-                    // No parser yet (issue #4) -- the command is only
-                    // echoed to the log, never interpreted.
-                    self.command_input.clear();
+                    let input = std::mem::take(&mut self.command_input);
+                    self.push_log(format!("> {input}"));
+                    match parser::parse(&input) {
+                        Ok(command) => {
+                            let confirmation = describe(&command);
+                            self.sim.apply_command(command);
+                            self.push_log(confirmation);
+                        }
+                        Err(err) => self.push_log(format!("ERROR: {err}")),
+                    }
                 }
             }
             KeyCode::Backspace => {
@@ -132,5 +140,16 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Human-readable confirmation shown in the log after a command is
+/// applied. Kept separate from `Command`'s `Debug` output so the log
+/// reads like an operator log, not a struct dump.
+fn describe(command: &Command) -> String {
+    match command {
+        Command::SetPitch(deg) => format!("OK: pitch target {deg:.1}"),
+        Command::SetBank(deg) => format!("OK: bank target {deg:.1}"),
+        Command::SetThrust(percent) => format!("OK: thrust target {percent:.1}%"),
     }
 }
