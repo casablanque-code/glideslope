@@ -10,6 +10,7 @@
 //! to pre-declare events for systems that don't exist yet.
 
 use crate::core::time::SimTime;
+use crate::crew::task::Task;
 
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -31,6 +32,11 @@ pub enum Event {
         // read via Debug/tracing today; will feed the debrief/replay summary later
         at: SimTime,
     },
+
+    /// Published when the FO finishes the task it was executing. Unlike
+    /// `Tick`, this is discrete and notable -- it belongs in the
+    /// operator-facing log, not filtered out of it.
+    TaskCompleted { task: Task },
 }
 
 #[cfg(test)]

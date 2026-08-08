@@ -10,11 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 ///
 /// One `IdGenerator` is expected per id "namespace" (sensors, tasks, ...),
 /// not one global generator for everything.
-#[allow(dead_code)] // first call site lands with issue #6 (sensors) / #7 (FO tasks)
 #[derive(Debug, Default)]
 pub struct IdGenerator(AtomicU64);
 
-#[allow(dead_code)] // first call site lands with issue #6 (sensors) / #7 (FO tasks)
 impl IdGenerator {
     pub const fn new() -> Self {
         Self(AtomicU64::new(0))
@@ -27,7 +25,11 @@ impl IdGenerator {
 
 macro_rules! typed_id {
     ($name:ident) => {
-        #[allow(dead_code)] // no constructors until issue #6 (sensors) / #7 (FO tasks)
+        // SensorId isn't constructed until issue #10 (sensor failures);
+        // EntityId has no call site yet either. TaskId is real as of
+        // #7. Shared across all three since the allow is harmless on
+        // code that's actually used.
+        #[allow(dead_code)]
         #[derive(
             Debug,
             Clone,

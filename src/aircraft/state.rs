@@ -73,6 +73,11 @@ impl AircraftState {
         self.vertical_speed_fpm =
             (self.pitch_deg - REFERENCE_LEVEL_PITCH_DEG) * FPM_PER_PITCH_DEGREE;
         self.altitude_ft += self.vertical_speed_fpm / 60.0 * dt_seconds;
+        // There's no ground/terrain model yet (that's world::airport +
+        // a real terrain-awareness issue, not scoped yet) -- but letting
+        // altitude go negative is clearly wrong in the meantime, so it's
+        // floored at zero rather than left unbounded.
+        self.altitude_ft = self.altitude_ft.max(0.0);
 
         let heading_rate = self.bank_deg * HEADING_DEG_PER_SECOND_PER_BANK_DEG;
         self.heading_deg = wrap_heading(self.heading_deg + heading_rate * dt_seconds);
@@ -143,6 +148,18 @@ mod tests {
         }
 
         assert_ne!(state.heading_deg, initial_heading);
+    }
+
+    #[test]
+    fn altitude_does_not_go_negative_on_a_sustained_descent() {
+        let mut state = AircraftState { altitude_ft: 100.0, ..AircraftState::cruise() };
+        let controls = ControlInputs { pitch_target_deg: -10.0, ..ControlInputs::default() };
+
+        for _ in 0..600 {
+            state.integrate(&controls, 0.1);
+        }
+
+        assert_eq!(state.altitude_ft, 0.0);
     }
 
     #[test]

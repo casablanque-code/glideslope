@@ -108,6 +108,16 @@ impl App {
                         for line in help_lines() {
                             self.push_log(line);
                         }
+                    } else if input.trim().eq_ignore_ascii_case("DELEGATE") {
+                        // Nothing generates real tasks yet (checklists are
+                        // #8, ATC comms don't exist) -- this queues one
+                        // canned demo task so the FO queue mechanic can
+                        // actually be exercised from the shell, the same
+                        // way PITCH/BANK/THRUST let #6's aircraft state be
+                        // exercised before an autopilot existed to drive
+                        // it. Not real gameplay content.
+                        self.sim.delegate_task("Read QRH (demo task)", Duration::from_secs(10));
+                        self.push_log("OK: delegated 'Read QRH (demo task)' to FO".to_string());
                     } else {
                         match parser::parse(&input) {
                             Ok(command) => {
@@ -149,6 +159,7 @@ impl App {
         let state = ScreenState {
             tick_count: self.sim.clock().tick_count(),
             aircraft: self.sim.aircraft(),
+            fo_queue: self.sim.fo_queue(),
             log_entries: &log_entries,
             command_input: &self.command_input,
         };
@@ -186,6 +197,7 @@ fn help_lines() -> Vec<String> {
         ));
     }
     lines.push("Type a command and press Enter, e.g. 'PITCH 5'.".to_string());
+    lines.push("Other commands: HELP, DELEGATE (queues a demo FO task).".to_string());
     lines
 }
 

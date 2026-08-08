@@ -4,6 +4,8 @@
 //! exercised without a real terminal.
 
 use crate::aircraft::state::AircraftState;
+use crate::core::time::TICKS_PER_SECOND;
+use crate::crew::queue::TaskQueue;
 use crate::ui::{layout, theme, widgets};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -12,6 +14,7 @@ use ratatui::Frame;
 pub struct ScreenState<'a> {
     pub tick_count: u64,
     pub aircraft: &'a AircraftState,
+    pub fo_queue: &'a TaskQueue,
     pub log_entries: &'a [String],
     pub command_input: &'a str,
 }
@@ -21,14 +24,11 @@ pub fn draw(frame: &mut Frame, state: &ScreenState) {
 
     frame.render_widget(widgets::pfd::widget(state.aircraft), regions.pfd);
     frame.render_widget(engine_panel(state.aircraft), regions.engine);
-    frame.render_widget(
-        aircraft_status_panel(state.tick_count, state.aircraft),
-        regions.aircraft_status,
-    );
+    frame.render_widget(aircraft_status_panel(state.tick_count), regions.aircraft_status);
 
     frame.render_widget(atc_panel(), regions.atc);
     frame.render_widget(weather_panel(), regions.weather);
-    frame.render_widget(widgets::fo_queue::widget(), regions.fo_queue);
+    frame.render_widget(widgets::fo_queue::widget(state.fo_queue), regions.fo_queue);
 
     // The log region has a 1-cell border on top and bottom; only that
     // many text rows are actually visible. Paragraph doesn't auto-scroll
@@ -66,7 +66,13 @@ fn weather_panel() -> Paragraph<'static> {
     widgets::placeholder("WEATHER", "awaiting weather model (issue #TBD)")
 }
 
-fn aircraft_status_panel(tick_count: u64, aircraft: &AircraftState) -> Paragraph<'static> {
+/// This panel is for aircraft configuration/systems summary (gear,
+/// flaps, autobrake, ...) -- none of which exist yet (checklists #8,
+/// failures #10). Flight/attitude data already lives on the PFD, so this
+/// doesn't duplicate it; the one thing it shows today is elapsed sim
+/// time, formatted as clock time rather than a raw tick count, which is
+/// an implementation detail that has no business leaking into the UI.
+fn aircraft_status_panel(tick_count: u64) -> Paragraph<'static> {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
@@ -74,20 +80,24 @@ fn aircraft_status_panel(tick_count: u64, aircraft: &AircraftState) -> Paragraph
 
     let lines = vec![
         Line::from(vec![
-            Span::raw("sim tick: "),
-            Span::styled(tick_count.to_string(), theme::status_running()),
+            Span::raw("elapsed: "),
+            Span::styled(format_elapsed(tick_count), theme::status_running()),
         ]),
-        Line::from(vec![
-            Span::raw("altitude: "),
-            Span::raw(format!("{:.0} ft", aircraft.altitude_ft)),
-        ]),
-        Line::from(vec![
-            Span::raw("heading:  "),
-            Span::raw(format!("{:.0}", aircraft.heading_deg)),
-        ]),
+        Line::styled(
+            "configuration: awaiting checklists (#8) / failures (#10)",
+            theme::placeholder_text(),
+        ),
     ];
 
     Paragraph::new(lines).block(block)
+}
+
+fn format_elapsed(tick_count: u64) -> String {
+    let total_seconds = tick_count / TICKS_PER_SECOND as u64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
 }
 
 #[cfg(test)]
@@ -100,8 +110,14 @@ mod tests {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let aircraft = AircraftState::cruise();
-        let state =
-            ScreenState { tick_count: 0, aircraft: &aircraft, log_entries, command_input: "" };
+        let fo_queue = TaskQueue::new();
+        let state = ScreenState {
+            tick_count: 0,
+            aircraft: &aircraft,
+            fo_queue: &fo_queue,
+            log_entries,
+            command_input: "",
+        };
 
         terminal.draw(|frame| draw(frame, &state)).unwrap();
 
@@ -113,6 +129,13 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<Vec<_>>()
             .join("")
+    }
+
+    #[test]
+    fn format_elapsed_renders_hh_mm_ss() {
+        assert_eq!(format_elapsed(0), "00:00:00");
+        assert_eq!(format_elapsed(TICKS_PER_SECOND as u64 * 90), "00:01:30");
+        assert_eq!(format_elapsed(TICKS_PER_SECOND as u64 * 3661), "01:01:01");
     }
 
     #[test]

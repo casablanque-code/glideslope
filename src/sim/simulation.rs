@@ -7,8 +7,12 @@ use crate::aircraft::state::AircraftState;
 use crate::core::command::Command;
 use crate::core::event::Event;
 use crate::core::event_bus::EventBus;
+use crate::core::ids::{IdGenerator, TaskId};
 use crate::core::tick::FixedTimestep;
 use crate::core::time::{SimClock, TICK_DURATION};
+use crate::crew::fo::FirstOfficer;
+use crate::crew::queue::TaskQueue;
+use crate::crew::task::Task;
 use std::time::Duration;
 
 pub struct Simulation {
@@ -21,6 +25,9 @@ pub struct Simulation {
     /// `ControlInputs::default()` (cruise trim), which is exactly why
     /// `AircraftState::cruise()` is defined to be in equilibrium with it.
     controls: ControlInputs,
+    first_officer: FirstOfficer,
+    fo_queue: TaskQueue,
+    task_ids: IdGenerator,
 }
 
 impl Simulation {
@@ -32,6 +39,9 @@ impl Simulation {
             started: false,
             aircraft: AircraftState::cruise(),
             controls: ControlInputs::default(),
+            first_officer: FirstOfficer::default(),
+            fo_queue: TaskQueue::new(),
+            task_ids: IdGenerator::new(),
         }
     }
 
@@ -41,6 +51,18 @@ impl Simulation {
 
     pub fn aircraft(&self) -> &AircraftState {
         &self.aircraft
+    }
+
+    pub fn fo_queue(&self) -> &TaskQueue {
+        &self.fo_queue
+    }
+
+    /// Hand a task to the FO. Mints a fresh `TaskId` so callers (the
+    /// command line, eventually checklists/#8) don't need their own id
+    /// bookkeeping.
+    pub fn delegate_task(&mut self, description: impl Into<String>, base_duration: Duration) {
+        let task = Task::new(TaskId(self.task_ids.next()), description, base_duration);
+        self.fo_queue.delegate(task, &self.first_officer);
     }
 
     /// Apply a parsed player command by updating the control targets the
@@ -70,6 +92,9 @@ impl Simulation {
         }
         self.clock.tick();
         self.aircraft.integrate(&self.controls, TICK_DURATION.as_secs_f64());
+        if let Some(completed) = self.fo_queue.integrate(TICK_DURATION, &self.first_officer) {
+            self.event_bus.publish(Event::TaskCompleted { task: completed });
+        }
         self.event_bus.publish(Event::Tick { at: self.clock.now() });
     }
 
@@ -98,7 +123,7 @@ impl Default for Simulation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::time::TICK_DURATION;
+    use crate::core::time::{TICKS_PER_SECOND, TICK_DURATION};
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -119,6 +144,32 @@ mod tests {
 
         assert_eq!(sim.clock().tick_count(), 3);
         assert_eq!(*ticks_seen.lock().unwrap(), 3);
+    }
+
+    #[test]
+    fn delegated_task_completes_and_publishes_an_event() {
+        let mut sim = Simulation::new();
+        let completed = Arc::new(Mutex::new(Vec::new()));
+        let completed_clone = Arc::clone(&completed);
+
+        sim.event_bus().subscribe(move |event| {
+            if let Event::TaskCompleted { task } = event {
+                completed_clone.lock().unwrap().push(task.description.clone());
+            }
+        });
+
+        sim.delegate_task("Read QRH", Duration::from_secs(1));
+        assert!(sim.fo_queue().executing().is_some());
+
+        // Default FO isn't fully experienced (see FirstOfficer::default),
+        // so a "1 second" task can take up to 2x that -- advance well
+        // past the worst case rather than assuming a 1x multiplier.
+        for _ in 0..(TICKS_PER_SECOND as usize * 3) {
+            sim.tick();
+        }
+
+        assert_eq!(*completed.lock().unwrap(), vec!["Read QRH".to_string()]);
+        assert!(sim.fo_queue().executing().is_none());
     }
 
     #[test]
