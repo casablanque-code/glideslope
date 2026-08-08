@@ -16,13 +16,21 @@ pub enum Event {
     /// Published by the sim loop at the end of every tick. Subsystems that
     /// only care about "time passed" (rather than a specific domain event)
     /// subscribe to this.
-    Tick { at: SimTime },
+    Tick {
+        #[allow(dead_code)]
+        // read via Debug/tracing today; subsystems (aircraft, weather, ...) will read it directly once they exist
+        at: SimTime,
+    },
 
     /// Published once when the simulation starts running.
     SimulationStarted,
 
     /// Published once when the simulation loop exits.
-    SimulationStopped { at: SimTime },
+    SimulationStopped {
+        #[allow(dead_code)]
+        // read via Debug/tracing today; will feed the debrief/replay summary later
+        at: SimTime,
+    },
 }
 
 #[cfg(test)]
@@ -31,9 +39,7 @@ mod tests {
 
     #[test]
     fn tick_event_carries_the_time_it_fired_at() {
-        let event = Event::Tick {
-            at: SimTime::from_ticks(42),
-        };
+        let event = Event::Tick { at: SimTime::from_ticks(42) };
         match event {
             Event::Tick { at } => assert_eq!(at.ticks(), 42),
             _ => panic!("expected Tick"),

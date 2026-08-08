@@ -27,7 +27,19 @@ impl IdGenerator {
 
 macro_rules! typed_id {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+        #[allow(dead_code)] // no constructors until issue #6 (sensors) / #7 (FO tasks)
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+            PartialOrd,
+            Ord,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
         pub struct $name(pub u64);
 
         impl fmt::Display for $name {

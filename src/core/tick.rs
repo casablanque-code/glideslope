@@ -23,9 +23,7 @@ pub struct FixedTimestep {
 
 impl FixedTimestep {
     pub fn new() -> Self {
-        Self {
-            accumulator: Duration::ZERO,
-        }
+        Self { accumulator: Duration::ZERO }
     }
 
     /// Record that `elapsed` wall-clock time has passed since the last call.

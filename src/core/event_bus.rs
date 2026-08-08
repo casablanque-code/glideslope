@@ -17,9 +17,7 @@ pub struct EventBus {
 
 impl EventBus {
     pub fn new() -> Self {
-        Self {
-            subscribers: Vec::new(),
-        }
+        Self { subscribers: Vec::new() }
     }
 
     /// Register a closure to be called with every event published from
@@ -59,12 +57,8 @@ mod tests {
             received_clone.lock().unwrap().push(format!("{:?}", event));
         });
 
-        bus.publish(Event::Tick {
-            at: SimTime::from_ticks(1),
-        });
-        bus.publish(Event::SimulationStopped {
-            at: SimTime::from_ticks(2),
-        });
+        bus.publish(Event::Tick { at: SimTime::from_ticks(1) });
+        bus.publish(Event::SimulationStopped { at: SimTime::from_ticks(2) });
 
         let received = received.lock().unwrap();
         assert_eq!(received.len(), 2);
