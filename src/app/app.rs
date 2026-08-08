@@ -108,16 +108,27 @@ impl App {
                         for line in help_lines() {
                             self.push_log(line);
                         }
+                    } else if input.trim().eq_ignore_ascii_case("CHECKLIST") {
+                        for line in checklist_lines(self.sim.checklist()) {
+                            self.push_log(line);
+                        }
+                    } else if input.trim().eq_ignore_ascii_case("CHECK") {
+                        match self.sim.check_next_checklist_item() {
+                            Some(name) => self.push_log(format!("OK: checked '{name}'")),
+                            None => self.push_log(
+                                "ERROR: checklist already complete (or nothing to check)"
+                                    .to_string(),
+                            ),
+                        }
                     } else if input.trim().eq_ignore_ascii_case("DELEGATE") {
-                        // Nothing generates real tasks yet (checklists are
-                        // #8, ATC comms don't exist) -- this queues one
-                        // canned demo task so the FO queue mechanic can
-                        // actually be exercised from the shell, the same
-                        // way PITCH/BANK/THRUST let #6's aircraft state be
-                        // exercised before an autopilot existed to drive
-                        // it. Not real gameplay content.
-                        self.sim.delegate_task("Read QRH (demo task)", Duration::from_secs(10));
-                        self.push_log("OK: delegated 'Read QRH (demo task)' to FO".to_string());
+                        match self.sim.delegate_next_checklist_item() {
+                            Some(name) => self.push_log(format!("OK: delegated '{name}' to FO")),
+                            None => self.push_log(
+                                "ERROR: nothing left to delegate (checklist complete, or \
+                                 every remaining item is already with the FO)"
+                                    .to_string(),
+                            ),
+                        }
                     } else {
                         match parser::parse(&input) {
                             Ok(command) => {
@@ -197,7 +208,25 @@ fn help_lines() -> Vec<String> {
         ));
     }
     lines.push("Type a command and press Enter, e.g. 'PITCH 5'.".to_string());
-    lines.push("Other commands: HELP, DELEGATE (queues a demo FO task).".to_string());
+    lines.push("Other commands:".to_string());
+    lines.push("  HELP       show this text".to_string());
+    lines.push("  CHECKLIST  show the active checklist and its status".to_string());
+    lines.push("  CHECK      check off the next pending item yourself".to_string());
+    lines.push("  DELEGATE   hand the next pending item to the FO".to_string());
+    lines
+}
+
+/// Renders a checklist as `[x]`/`[ ]` lines for the log, since there's no
+/// dedicated screen region for it in the roadmap's layout.
+fn checklist_lines(checklist: &crate::checklist::Checklist) -> Vec<String> {
+    let mut lines = vec![format!("{}:", checklist.name)];
+    for item in &checklist.items {
+        let mark = if item.complete { "x" } else { " " };
+        lines.push(format!("  [{mark}] {}", item.name));
+    }
+    if checklist.is_complete() {
+        lines.push("Status: COMPLETE".to_string());
+    }
     lines
 }
 
@@ -262,6 +291,46 @@ mod tests {
         drop(log);
 
         assert_eq!(app.sim.aircraft().pitch_deg, pitch_before);
+    }
+
+    #[test]
+    fn check_command_checks_off_the_next_item() {
+        let mut app = App::new();
+        type_str(&mut app, "check");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().any(|entry| entry.contains("Gear")));
+        drop(log);
+
+        assert!(app.sim.checklist().items[0].complete);
+    }
+
+    #[test]
+    fn delegate_command_delegates_the_next_item_to_the_fo() {
+        let mut app = App::new();
+        type_str(&mut app, "delegate");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().any(|entry| entry.contains("Gear")));
+        drop(log);
+
+        assert!(app.sim.fo_queue().executing().is_some());
+        assert!(!app.sim.checklist().items[0].complete); // not done yet, only delegated
+    }
+
+    #[test]
+    fn checklist_command_lists_all_items() {
+        let mut app = App::new();
+        type_str(&mut app, "checklist");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        let joined = log.iter().cloned().collect::<Vec<_>>().join("\n");
+        for name in ["Gear", "Flaps", "Spoilers", "Autobrake", "Cabin"] {
+            assert!(joined.contains(name), "CHECKLIST output should mention {name}");
+        }
     }
 
     #[test]

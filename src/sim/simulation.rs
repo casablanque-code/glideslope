@@ -4,6 +4,8 @@
 
 use crate::aircraft::controls::ControlInputs;
 use crate::aircraft::state::AircraftState;
+use crate::checklist::landing::landing_checklist;
+use crate::checklist::Checklist;
 use crate::core::command::Command;
 use crate::core::event::Event;
 use crate::core::event_bus::EventBus;
@@ -12,8 +14,14 @@ use crate::core::tick::FixedTimestep;
 use crate::core::time::{SimClock, TICK_DURATION};
 use crate::crew::fo::FirstOfficer;
 use crate::crew::queue::TaskQueue;
-use crate::crew::task::Task;
+use crate::crew::task::{Task, TaskSource};
 use std::time::Duration;
+
+/// How long the FO takes on a delegated checklist item (before their
+/// own experience-based speed multiplier is applied). Not sourced from
+/// any real checklist-item timing data -- picked to feel deliberate
+/// without being tedious to watch.
+const CHECKLIST_ITEM_DURATION: Duration = Duration::from_secs(5);
 
 pub struct Simulation {
     clock: SimClock,
@@ -28,10 +36,19 @@ pub struct Simulation {
     first_officer: FirstOfficer,
     fo_queue: TaskQueue,
     task_ids: IdGenerator,
+    checklist: Checklist,
+    /// Tracks which checklist items already have a task delegated for
+    /// them, separately from `complete` -- without this, calling
+    /// "delegate next item" twice before the first finishes would queue
+    /// the same item to the FO twice.
+    checklist_delegated: Vec<bool>,
 }
 
 impl Simulation {
     pub fn new() -> Self {
+        let checklist = landing_checklist();
+        let checklist_delegated = vec![false; checklist.items.len()];
+
         Self {
             clock: SimClock::new(),
             event_bus: EventBus::new(),
@@ -42,6 +59,8 @@ impl Simulation {
             first_officer: FirstOfficer::default(),
             fo_queue: TaskQueue::new(),
             task_ids: IdGenerator::new(),
+            checklist,
+            checklist_delegated,
         }
     }
 
@@ -57,12 +76,49 @@ impl Simulation {
         &self.fo_queue
     }
 
-    /// Hand a task to the FO. Mints a fresh `TaskId` so callers (the
-    /// command line, eventually checklists/#8) don't need their own id
-    /// bookkeeping.
-    pub fn delegate_task(&mut self, description: impl Into<String>, base_duration: Duration) {
-        let task = Task::new(TaskId(self.task_ids.next()), description, base_duration);
+    pub fn checklist(&self) -> &Checklist {
+        &self.checklist
+    }
+
+    /// Hand a task to the FO. Mints a fresh `TaskId` so callers don't
+    /// need their own id bookkeeping.
+    pub fn delegate_task(
+        &mut self,
+        description: impl Into<String>,
+        base_duration: Duration,
+        source: TaskSource,
+    ) {
+        let task = Task::new(TaskId(self.task_ids.next()), description, base_duration, source);
         self.fo_queue.delegate(task, &self.first_officer);
+    }
+
+    /// Delegate the next not-yet-complete, not-already-delegated checklist
+    /// item to the FO. Returns the item's name, or `None` if there's
+    /// nothing left to delegate (checklist complete, or every remaining
+    /// item is already in the FO's queue).
+    pub fn delegate_next_checklist_item(&mut self) -> Option<String> {
+        let idx = self
+            .checklist
+            .items
+            .iter()
+            .zip(self.checklist_delegated.iter())
+            .position(|(item, delegated)| !item.complete && !*delegated)?;
+
+        self.checklist_delegated[idx] = true;
+        let name = self.checklist.items[idx].name.clone();
+        self.delegate_task(
+            format!("Checklist: {name}"),
+            CHECKLIST_ITEM_DURATION,
+            TaskSource::ChecklistItem(idx),
+        );
+        Some(name)
+    }
+
+    /// Mark the next pending checklist item complete directly -- the
+    /// player performing it themselves instead of delegating to the FO.
+    /// Takes effect immediately, no queue/timing involved.
+    pub fn check_next_checklist_item(&mut self) -> Option<String> {
+        self.checklist.check_next()
     }
 
     /// Apply a parsed player command by updating the control targets the
@@ -93,6 +149,11 @@ impl Simulation {
         self.clock.tick();
         self.aircraft.integrate(&self.controls, TICK_DURATION.as_secs_f64());
         if let Some(completed) = self.fo_queue.integrate(TICK_DURATION, &self.first_officer) {
+            if let TaskSource::ChecklistItem(idx) = completed.source {
+                if let Some(item) = self.checklist.items.get_mut(idx) {
+                    item.complete = true;
+                }
+            }
             self.event_bus.publish(Event::TaskCompleted { task: completed });
         }
         self.event_bus.publish(Event::Tick { at: self.clock.now() });
@@ -158,7 +219,7 @@ mod tests {
             }
         });
 
-        sim.delegate_task("Read QRH", Duration::from_secs(1));
+        sim.delegate_task("Read QRH", Duration::from_secs(1), TaskSource::Adhoc);
         assert!(sim.fo_queue().executing().is_some());
 
         // Default FO isn't fully experienced (see FirstOfficer::default),
@@ -170,6 +231,67 @@ mod tests {
 
         assert_eq!(*completed.lock().unwrap(), vec!["Read QRH".to_string()]);
         assert!(sim.fo_queue().executing().is_none());
+    }
+
+    #[test]
+    fn manually_checking_an_item_completes_it_instantly() {
+        let mut sim = Simulation::new();
+        let checked = sim.check_next_checklist_item();
+        assert_eq!(checked, Some("Gear".to_string()));
+        assert!(sim.checklist().items[0].complete);
+        assert!(sim.fo_queue().executing().is_none()); // no FO involvement
+    }
+
+    #[test]
+    fn delegating_a_checklist_item_does_not_complete_it_until_the_fo_finishes() {
+        let mut sim = Simulation::new();
+        let delegated = sim.delegate_next_checklist_item();
+
+        assert_eq!(delegated, Some("Gear".to_string()));
+        assert!(!sim.checklist().items[0].complete);
+        assert!(sim.fo_queue().executing().is_some());
+
+        for _ in 0..(TICKS_PER_SECOND as usize * 15) {
+            sim.tick();
+        }
+
+        assert!(sim.checklist().items[0].complete);
+    }
+
+    #[test]
+    fn delegating_twice_before_completion_queues_two_different_items_not_the_same_one() {
+        let mut sim = Simulation::new();
+        let first = sim.delegate_next_checklist_item();
+        let second = sim.delegate_next_checklist_item();
+
+        // Delegation isn't sequentially gated -- the FO can have more
+        // than one item queued at once, same as any other tasks. What
+        // it must never do is re-delegate an item already in flight.
+        assert_eq!(first, Some("Gear".to_string()));
+        assert_eq!(second, Some("Flaps".to_string()));
+        assert_eq!(sim.fo_queue().pending().count(), 1);
+
+        // A third call moves on to the next undelegated item still left.
+        let third = sim.delegate_next_checklist_item();
+        assert_eq!(third, Some("Spoilers".to_string()));
+    }
+
+    #[test]
+    fn delegating_repeatedly_eventually_exhausts_every_item() {
+        let mut sim = Simulation::new();
+        let mut delegated = Vec::new();
+        while let Some(name) = sim.delegate_next_checklist_item() {
+            delegated.push(name);
+        }
+        assert_eq!(delegated, vec!["Gear", "Flaps", "Spoilers", "Autobrake", "Cabin"]);
+        assert_eq!(sim.delegate_next_checklist_item(), None);
+    }
+
+    #[test]
+    fn checklist_is_complete_once_every_item_is_checked() {
+        let mut sim = Simulation::new();
+        while sim.check_next_checklist_item().is_some() {}
+        assert!(sim.checklist().is_complete());
     }
 
     #[test]

@@ -77,9 +77,15 @@ impl TaskQueue {
 mod tests {
     use super::*;
     use crate::core::ids::TaskId;
+    use crate::crew::task::TaskSource;
 
     fn task(id: u64, duration_secs: u64) -> Task {
-        Task::new(TaskId(id), format!("task-{id}"), Duration::from_secs(duration_secs))
+        Task::new(
+            TaskId(id),
+            format!("task-{id}"),
+            Duration::from_secs(duration_secs),
+            TaskSource::Adhoc,
+        )
     }
 
     #[test]
