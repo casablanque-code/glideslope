@@ -36,7 +36,13 @@ pub enum Event {
     /// Published when the FO finishes the task it was executing. Unlike
     /// `Tick`, this is discrete and notable -- it belongs in the
     /// operator-facing log, not filtered out of it.
-    TaskCompleted { task: Task },
+    TaskCompleted {
+        #[allow(dead_code)]
+        // read via Debug/tracing today (and in tests); the FO queue UI
+        // panel reads TaskQueue directly rather than this event -- a
+        // future debrief/history feature is the likely real consumer.
+        task: Task,
+    },
 }
 
 #[cfg(test)]
