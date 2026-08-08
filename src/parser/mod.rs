@@ -1,5 +1,9 @@
 pub mod grammar;
 pub mod lexer;
+// The parser/parser.rs split (rather than folding the matching logic
+// into this mod.rs) matches the module layout in ROADMAP.md. Same
+// deliberate case as app/app.rs -- see the comment there.
+#[allow(clippy::module_inception)]
 pub mod parser;
 
 use crate::core::command::Command;
@@ -20,28 +24,28 @@ mod tests {
 
     #[test]
     fn parses_valid_pitch_command() {
-        assert_eq!(parse("PITCH 5"), Ok(Command::SetPitch(5.0)));
+        assert_eq!(parse("PITCH 5"), Ok(Command::Pitch(5.0)));
     }
 
     #[test]
     fn parses_valid_bank_command_with_negative_value() {
-        assert_eq!(parse("BANK -10"), Ok(Command::SetBank(-10.0)));
+        assert_eq!(parse("BANK -10"), Ok(Command::Bank(-10.0)));
     }
 
     #[test]
     fn parses_valid_thrust_command() {
-        assert_eq!(parse("THRUST 90"), Ok(Command::SetThrust(90.0)));
+        assert_eq!(parse("THRUST 90"), Ok(Command::Thrust(90.0)));
     }
 
     #[test]
     fn command_name_is_case_insensitive() {
-        assert_eq!(parse("bank -10"), Ok(Command::SetBank(-10.0)));
-        assert_eq!(parse("Thrust 50"), Ok(Command::SetThrust(50.0)));
+        assert_eq!(parse("bank -10"), Ok(Command::Bank(-10.0)));
+        assert_eq!(parse("Thrust 50"), Ok(Command::Thrust(50.0)));
     }
 
     #[test]
     fn tolerates_extra_surrounding_whitespace() {
-        assert_eq!(parse("   PITCH   5   "), Ok(Command::SetPitch(5.0)));
+        assert_eq!(parse("   PITCH   5   "), Ok(Command::Pitch(5.0)));
     }
 
     #[test]

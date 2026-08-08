@@ -45,9 +45,9 @@ fn validate_range(spec: &CommandSpec, value: f64) -> Result<(), SimError> {
 
 fn build_command(spec: &CommandSpec, value: f64) -> Command {
     match spec.name {
-        "PITCH" => Command::SetPitch(value),
-        "BANK" => Command::SetBank(value),
-        "THRUST" => Command::SetThrust(value),
+        "PITCH" => Command::Pitch(value),
+        "BANK" => Command::Bank(value),
+        "THRUST" => Command::Thrust(value),
         // Unreachable as long as `grammar::{PITCH,BANK,THRUST}` and this
         // match stay in sync -- a mismatch here is a bug caught by the
         // tests below, not something a user's input can trigger.
@@ -66,9 +66,9 @@ mod tests {
 
     #[test]
     fn every_grammar_command_builds_successfully() {
-        assert_eq!(parse("PITCH 0"), Ok(Command::SetPitch(0.0)));
-        assert_eq!(parse("BANK 0"), Ok(Command::SetBank(0.0)));
-        assert_eq!(parse("THRUST 0"), Ok(Command::SetThrust(0.0)));
+        assert_eq!(parse("PITCH 0"), Ok(Command::Pitch(0.0)));
+        assert_eq!(parse("BANK 0"), Ok(Command::Bank(0.0)));
+        assert_eq!(parse("THRUST 0"), Ok(Command::Thrust(0.0)));
     }
 
     #[test]

@@ -148,8 +148,8 @@ impl Default for App {
 /// reads like an operator log, not a struct dump.
 fn describe(command: &Command) -> String {
     match command {
-        Command::SetPitch(deg) => format!("OK: pitch target {deg:.1}"),
-        Command::SetBank(deg) => format!("OK: bank target {deg:.1}"),
-        Command::SetThrust(percent) => format!("OK: thrust target {percent:.1}%"),
+        Command::Pitch(deg) => format!("OK: pitch target {deg:.1}"),
+        Command::Bank(deg) => format!("OK: bank target {deg:.1}"),
+        Command::Thrust(percent) => format!("OK: thrust target {percent:.1}%"),
     }
 }

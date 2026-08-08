@@ -7,7 +7,7 @@
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    SetPitch(f64),
-    SetBank(f64),
-    SetThrust(f64),
+    Pitch(f64),
+    Bank(f64),
+    Thrust(f64),
 }

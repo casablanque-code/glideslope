@@ -49,9 +49,9 @@ impl Simulation {
     /// its usual first-order response toward the new target.
     pub fn apply_command(&mut self, command: Command) {
         match command {
-            Command::SetPitch(deg) => self.controls.pitch_target_deg = deg,
-            Command::SetBank(deg) => self.controls.bank_target_deg = deg,
-            Command::SetThrust(percent) => self.controls.thrust_target_percent = percent,
+            Command::Pitch(deg) => self.controls.pitch_target_deg = deg,
+            Command::Bank(deg) => self.controls.bank_target_deg = deg,
+            Command::Thrust(percent) => self.controls.thrust_target_percent = percent,
         }
     }
 
@@ -126,7 +126,7 @@ mod tests {
         let mut sim = Simulation::new();
         let initial_altitude = sim.aircraft().altitude_ft;
 
-        sim.apply_command(Command::SetPitch(7.5));
+        sim.apply_command(Command::Pitch(7.5));
         for _ in 0..50 {
             sim.tick();
         }
