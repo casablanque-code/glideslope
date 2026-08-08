@@ -15,13 +15,32 @@ use std::ops::RangeInclusive;
 pub struct CommandSpec {
     pub name: &'static str,
     pub range: RangeInclusive<f64>,
+    /// One-line explanation shown by the `HELP` command. Kept here
+    /// rather than duplicated in `app.rs` so the reference text can
+    /// never drift out of sync with the actual validated range.
+    pub description: &'static str,
 }
 
-pub const PITCH: CommandSpec = CommandSpec { name: "PITCH", range: -15.0..=15.0 };
-pub const BANK: CommandSpec = CommandSpec { name: "BANK", range: -30.0..=30.0 };
-pub const THRUST: CommandSpec = CommandSpec { name: "THRUST", range: 0.0..=100.0 };
+pub const PITCH: CommandSpec = CommandSpec {
+    name: "PITCH",
+    range: -15.0..=15.0,
+    description: "target pitch angle, degrees nose up (negative = nose down)",
+};
+pub const BANK: CommandSpec = CommandSpec {
+    name: "BANK",
+    range: -30.0..=30.0,
+    description: "target bank angle, degrees right (negative = left)",
+};
+pub const THRUST: CommandSpec = CommandSpec {
+    name: "THRUST",
+    range: 0.0..=100.0,
+    description: "target engine thrust, percent N1",
+};
 
-const ALL: [&CommandSpec; 3] = [&PITCH, &BANK, &THRUST];
+/// Every known command, in the order `HELP` lists them. Exposed publicly
+/// so `HELP` can generate its listing from this table instead of a
+/// second, hand-maintained copy of the same names/ranges/descriptions.
+pub const ALL: [&CommandSpec; 3] = [&PITCH, &BANK, &THRUST];
 
 pub fn lookup(name: &str) -> Option<&'static CommandSpec> {
     ALL.into_iter().find(|spec| spec.name.eq_ignore_ascii_case(name))

@@ -98,13 +98,25 @@ impl App {
                 if !self.command_input.is_empty() {
                     let input = std::mem::take(&mut self.command_input);
                     self.push_log(format!("> {input}"));
-                    match parser::parse(&input) {
-                        Ok(command) => {
-                            let confirmation = describe(&command);
-                            self.sim.apply_command(command);
-                            self.push_log(confirmation);
+
+                    // HELP isn't a Command the simulation acts on -- it's
+                    // a UI convenience, so it's handled before the real
+                    // parser rather than adding a no-op arm to
+                    // Simulation::apply_command for something that isn't
+                    // really a simulation command.
+                    if input.trim().eq_ignore_ascii_case("HELP") {
+                        for line in help_lines() {
+                            self.push_log(line);
                         }
-                        Err(err) => self.push_log(format!("ERROR: {err}")),
+                    } else {
+                        match parser::parse(&input) {
+                            Ok(command) => {
+                                let confirmation = describe(&command);
+                                self.sim.apply_command(command);
+                                self.push_log(confirmation);
+                            }
+                            Err(err) => self.push_log(format!("ERROR: {err}")),
+                        }
                     }
                 }
             }
@@ -158,6 +170,23 @@ fn push_capped(log: &mut VecDeque<String>, entry: String) {
         log.pop_front();
     }
     log.push_back(entry);
+}
+
+/// Generates the `HELP` listing from `parser::grammar::ALL` so it can
+/// never drift out of sync with what the parser actually accepts.
+fn help_lines() -> Vec<String> {
+    let mut lines = vec!["Commands:".to_string()];
+    for spec in crate::parser::grammar::ALL {
+        lines.push(format!(
+            "  {:<7} {:>6}..{:<6} {}",
+            spec.name,
+            spec.range.start(),
+            spec.range.end(),
+            spec.description
+        ));
+    }
+    lines.push("Type a command and press Enter, e.g. 'PITCH 5'.".to_string());
+    lines
 }
 
 /// Human-readable confirmation shown in the log after a command is
@@ -221,6 +250,19 @@ mod tests {
         drop(log);
 
         assert_eq!(app.sim.aircraft().pitch_deg, pitch_before);
+    }
+
+    #[test]
+    fn help_command_lists_every_grammar_command() {
+        let mut app = App::new();
+        type_str(&mut app, "help");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        let joined = log.iter().cloned().collect::<Vec<_>>().join("\n");
+        for spec in crate::parser::grammar::ALL {
+            assert!(joined.contains(spec.name), "HELP output should mention {}", spec.name);
+        }
     }
 
     #[test]

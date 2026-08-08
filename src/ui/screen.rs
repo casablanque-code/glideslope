@@ -30,7 +30,15 @@ pub fn draw(frame: &mut Frame, state: &ScreenState) {
     frame.render_widget(weather_panel(), regions.weather);
     frame.render_widget(widgets::fo_queue::widget(), regions.fo_queue);
 
-    frame.render_widget(widgets::log::widget(state.log_entries.iter()), regions.log);
+    // The log region has a 1-cell border on top and bottom; only that
+    // many text rows are actually visible. Paragraph doesn't auto-scroll
+    // to the bottom on its own, so without this, once entries exceed the
+    // visible height, the *newest* entries -- the ones at the end of the
+    // vec -- are the ones that get clipped, which is backwards for a
+    // live log.
+    let visible_rows = regions.log.height.saturating_sub(2) as usize;
+    let start = state.log_entries.len().saturating_sub(visible_rows);
+    frame.render_widget(widgets::log::widget(state.log_entries[start..].iter()), regions.log);
     frame.render_widget(widgets::command_line::widget(state.command_input), regions.command_line);
 }
 
@@ -80,4 +88,49 @@ fn aircraft_status_panel(tick_count: u64, aircraft: &AircraftState) -> Paragraph
     ];
 
     Paragraph::new(lines).block(block)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn rendered_text(width: u16, height: u16, log_entries: &[String]) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let aircraft = AircraftState::cruise();
+        let state =
+            ScreenState { tick_count: 0, aircraft: &aircraft, log_entries, command_input: "" };
+
+        terminal.draw(|frame| draw(frame, &state)).unwrap();
+
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    #[test]
+    fn log_shows_the_most_recent_entries_when_overflowing_the_visible_area() {
+        // Small terminal -> the log region only fits a couple of rows.
+        // With more entries than that, the tail (newest) must still be
+        // visible -- the old bug clipped the newest entries instead.
+        let entries: Vec<String> = (0..50).map(|i| format!("entry-{i}")).collect();
+        let text = rendered_text(80, 24, &entries);
+
+        assert!(text.contains("entry-49"), "newest entry should be visible");
+        assert!(!text.contains("entry-0 "), "oldest entry should have scrolled off");
+    }
+
+    #[test]
+    fn log_shows_everything_when_it_fits() {
+        let entries: Vec<String> = vec!["only entry".to_string()];
+        let text = rendered_text(80, 24, &entries);
+        assert!(text.contains("only entry"));
+    }
 }
