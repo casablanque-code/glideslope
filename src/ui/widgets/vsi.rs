@@ -1,0 +1,9 @@
+//! Vertical speed indicator. Stubbed until issue #6 (aircraft state)
+//! provides a real climb/descent rate to render.
+
+use ratatui::widgets::Paragraph;
+
+#[allow(dead_code)] // not composed into pfd::widget() yet -- pfd itself is still a placeholder
+pub fn widget() -> Paragraph<'static> {
+    super::placeholder("VSI", "awaiting aircraft state (issue #6)")
+}
