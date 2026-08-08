@@ -42,11 +42,21 @@ impl App {
 
         let log_for_subscriber = Arc::clone(&log);
         sim.event_bus().subscribe(move |event: &Event| {
-            let mut log = log_for_subscriber.lock().unwrap();
-            if log.len() == LOG_CAPACITY {
-                log.pop_front();
+            // Tick fires 10x/sec (see core::time::TICKS_PER_SECOND) and
+            // would drown out everything else in the log within a couple
+            // of seconds -- it exists for subsystems that need to know
+            // time passed, not for this operator-facing log. Only
+            // discrete, notable events belong here (start/stop today;
+            // failures, checklist steps, ATC calls once those issues
+            // land). Command confirmations/errors are pushed directly by
+            // handle_key, not through the bus, so they're unaffected by
+            // this filter either way.
+            if matches!(event, Event::Tick { .. }) {
+                return;
             }
-            log.push_back(format!("{event:?}"));
+
+            let mut log = log_for_subscriber.lock().unwrap();
+            push_capped(&mut log, format!("{event:?}"));
         });
 
         Self { sim, log, command_input: String::new(), should_quit: false }
@@ -118,10 +128,7 @@ impl App {
 
     fn push_log(&mut self, entry: String) {
         let mut log = self.log.lock().unwrap();
-        if log.len() == LOG_CAPACITY {
-            log.pop_front();
-        }
-        log.push_back(entry);
+        push_capped(&mut log, entry);
     }
 
     fn draw(&self, frame: &mut ratatui::Frame) {
@@ -143,6 +150,16 @@ impl Default for App {
     }
 }
 
+/// Push `entry` onto `log`, evicting the oldest entry first if already at
+/// `LOG_CAPACITY`. Shared by the event-bus subscriber and `App::push_log`
+/// so the cap is enforced in exactly one place.
+fn push_capped(log: &mut VecDeque<String>, entry: String) {
+    if log.len() == LOG_CAPACITY {
+        log.pop_front();
+    }
+    log.push_back(entry);
+}
+
 /// Human-readable confirmation shown in the log after a command is
 /// applied. Kept separate from `Command`'s `Debug` output so the log
 /// reads like an operator log, not a struct dump.
@@ -151,5 +168,79 @@ fn describe(command: &Command) -> String {
         Command::Pitch(deg) => format!("OK: pitch target {deg:.1}"),
         Command::Bank(deg) => format!("OK: bank target {deg:.1}"),
         Command::Thrust(percent) => format!("OK: thrust target {percent:.1}%"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+
+    fn type_str(app: &mut App, input: &str) {
+        for c in input.chars() {
+            app.handle_key(KeyCode::Char(c), KeyModifiers::NONE);
+        }
+    }
+
+    #[test]
+    fn ticks_do_not_reach_the_operator_log() {
+        let mut app = App::new();
+        for _ in 0..50 {
+            app.sim.tick();
+        }
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().all(|entry| !entry.contains("Tick")));
+    }
+
+    #[test]
+    fn valid_command_logs_a_confirmation_and_updates_controls() {
+        let mut app = App::new();
+        type_str(&mut app, "PITCH 5");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().any(|entry| entry.starts_with("OK: pitch target 5.0")));
+        drop(log);
+
+        for _ in 0..10 {
+            app.sim.tick();
+        }
+        assert!(app.sim.aircraft().pitch_deg > 2.5);
+    }
+
+    #[test]
+    fn invalid_command_logs_an_error_and_leaves_controls_untouched() {
+        let mut app = App::new();
+        let pitch_before = app.sim.aircraft().pitch_deg;
+
+        type_str(&mut app, "FLAPS 15");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().any(|entry| entry.starts_with("ERROR:")));
+        drop(log);
+
+        assert_eq!(app.sim.aircraft().pitch_deg, pitch_before);
+    }
+
+    #[test]
+    fn command_input_clears_after_submission() {
+        let mut app = App::new();
+        type_str(&mut app, "BANK 10");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(app.command_input.is_empty());
+    }
+
+    #[test]
+    fn log_evicts_oldest_entry_once_at_capacity() {
+        let mut log = VecDeque::new();
+        for i in 0..LOG_CAPACITY {
+            push_capped(&mut log, format!("entry {i}"));
+        }
+        push_capped(&mut log, "overflow".to_string());
+
+        assert_eq!(log.len(), LOG_CAPACITY);
+        assert_eq!(log.front().unwrap(), "entry 1");
+        assert_eq!(log.back().unwrap(), "overflow");
     }
 }
