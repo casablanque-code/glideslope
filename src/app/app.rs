@@ -129,6 +129,10 @@ impl App {
                                     .to_string(),
                             ),
                         }
+                    } else if input.trim().eq_ignore_ascii_case("AIRPORT") {
+                        for line in airport_lines(self.sim.airport()) {
+                            self.push_log(line);
+                        }
                     } else {
                         match parser::parse(&input) {
                             Ok(command) => {
@@ -213,6 +217,7 @@ fn help_lines() -> Vec<String> {
     lines.push("  CHECKLIST  show the active checklist and its status".to_string());
     lines.push("  CHECK      check off the next pending item yourself".to_string());
     lines.push("  DELEGATE   hand the next pending item to the FO".to_string());
+    lines.push("  AIRPORT    show the current airport and runway".to_string());
     lines
 }
 
@@ -228,6 +233,21 @@ fn checklist_lines(checklist: &crate::checklist::Checklist) -> Vec<String> {
         lines.push("Status: COMPLETE".to_string());
     }
     lines
+}
+
+/// Static facts about the airport -- no clearances, no ATC dialogue
+/// (that's #12's job once it exists). Just what's actually known: name,
+/// identifier, and the one runway.
+fn airport_lines(airport: &crate::world::airport::Airport) -> Vec<String> {
+    vec![
+        format!("{} ({})", airport.name, airport.icao),
+        format!(
+            "Runway {}: {:.0} ft, elevation {:.0} ft",
+            airport.runway.designator(),
+            airport.runway.length_ft,
+            airport.runway.elevation_ft
+        ),
+    ]
 }
 
 /// Human-readable confirmation shown in the log after a command is
@@ -331,6 +351,27 @@ mod tests {
         for name in ["Gear", "Flaps", "Spoilers", "Autobrake", "Cabin"] {
             assert!(joined.contains(name), "CHECKLIST output should mention {name}");
         }
+    }
+
+    #[test]
+    fn airport_command_shows_name_and_runway() {
+        let mut app = App::new();
+        type_str(&mut app, "airport");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        let joined = log.iter().cloned().collect::<Vec<_>>().join("\n");
+        assert!(joined.contains("Glideslope Regional"));
+        assert!(joined.contains("Runway 09"));
+    }
+
+    #[test]
+    fn sim_starts_on_the_ground_at_the_airport_not_in_cruise() {
+        let app = App::new();
+        let airport = app.sim.airport();
+        assert_eq!(app.sim.aircraft().altitude_ft, airport.runway.elevation_ft);
+        assert_eq!(app.sim.aircraft().indicated_airspeed_kt, 0.0);
+        assert_eq!(app.sim.aircraft().engine.n1_percent, 0.0);
     }
 
     #[test]

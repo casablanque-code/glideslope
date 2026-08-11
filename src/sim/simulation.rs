@@ -15,6 +15,7 @@ use crate::core::time::{SimClock, TICK_DURATION};
 use crate::crew::fo::FirstOfficer;
 use crate::crew::queue::TaskQueue;
 use crate::crew::task::{Task, TaskSource};
+use crate::world::airport::Airport;
 use std::time::Duration;
 
 /// How long the FO takes on a delegated checklist item (before their
@@ -29,10 +30,11 @@ pub struct Simulation {
     timestep: FixedTimestep,
     started: bool,
     aircraft: AircraftState,
-    /// No parser (#4) or FO (#7) writes to this yet -- it stays at
-    /// `ControlInputs::default()` (cruise trim), which is exactly why
-    /// `AircraftState::cruise()` is defined to be in equilibrium with it.
+    /// No ATC (#12) or phase machine (#13) writes to this yet -- it
+    /// stays at whatever the starting trim was (`GATE_TRIM` today) until
+    /// a player command (#4) changes it.
     controls: ControlInputs,
+    airport: Airport,
     first_officer: FirstOfficer,
     fo_queue: TaskQueue,
     task_ids: IdGenerator,
@@ -48,20 +50,29 @@ impl Simulation {
     pub fn new() -> Self {
         let checklist = landing_checklist();
         let checklist_delegated = vec![false; checklist.items.len()];
+        let airport = Airport::fictional();
 
         Self {
             clock: SimClock::new(),
             event_bus: EventBus::new(),
             timestep: FixedTimestep::new(),
             started: false,
-            aircraft: AircraftState::cruise(),
-            controls: ControlInputs::default(),
+            aircraft: AircraftState::at_gate(
+                airport.runway.elevation_ft,
+                airport.runway.heading_deg,
+            ),
+            controls: ControlInputs::GATE_TRIM,
+            airport,
             first_officer: FirstOfficer::default(),
             fo_queue: TaskQueue::new(),
             task_ids: IdGenerator::new(),
             checklist,
             checklist_delegated,
         }
+    }
+
+    pub fn airport(&self) -> &Airport {
+        &self.airport
     }
 
     pub fn clock(&self) -> &SimClock {

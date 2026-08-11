@@ -11,11 +11,6 @@
 use crate::aircraft::controls::ControlInputs;
 use crate::aircraft::engines::EngineState;
 
-/// Pitch, in degrees, that holds level flight at cruise trim. Used as the
-/// zero point for the pitch -> vertical-speed coupling: at exactly this
-/// pitch, vertical speed is zero.
-const REFERENCE_LEVEL_PITCH_DEG: f64 = ControlInputs::CRUISE_TRIM.pitch_target_deg;
-
 /// How many feet per minute of climb/descent one degree of pitch away
 /// from level produces. Not derived from real aircraft performance data
 /// -- picked to give a believable-feeling response.
@@ -43,6 +38,17 @@ pub struct AircraftState {
     /// value to display; it will not move on its own until that lands.
     pub indicated_airspeed_kt: f64,
     pub engine: EngineState,
+    /// The pitch, in degrees, that gives zero vertical speed for
+    /// whatever trim this state started at -- not a real aircraft's
+    /// AoA/speed relationship (which we don't model), just the pitch
+    /// value each constructor is already defined to be in equilibrium
+    /// at. Was previously a single hardcoded module constant tied to
+    /// cruise trim specifically; that was wrong for any other starting
+    /// trim (a parked, level aircraft at 0deg pitch was computed as
+    /// descending, because 2.5deg -- cruise's trim -- was being treated
+    /// as universal "level"). Per-instance until there's a real
+    /// AoA/speed model to replace this with.
+    trim_reference_pitch_deg: f64,
 }
 
 impl AircraftState {
@@ -58,6 +64,35 @@ impl AircraftState {
             bank_deg: ControlInputs::CRUISE_TRIM.bank_target_deg,
             indicated_airspeed_kt: 250.0,
             engine: EngineState::new(),
+            trim_reference_pitch_deg: ControlInputs::CRUISE_TRIM.pitch_target_deg,
+        }
+    }
+
+    /// On the ground at a gate: engines off, stationary, wings level,
+    /// nose level -- in equilibrium with `ControlInputs::GATE_TRIM`, the
+    /// same way `cruise()` matches `CRUISE_TRIM`. Takes plain values
+    /// (elevation, heading) rather than a `world::airport::Airport`
+    /// directly, so `aircraft::state` doesn't need to depend on
+    /// `world::airport` -- the caller (`Simulation`) reads those fields
+    /// off whatever airport it's using.
+    ///
+    /// Note this doesn't add any ground-contact enforcement: nothing
+    /// stops `integrate()` from "climbing" a stationary, engines-off
+    /// aircraft if pitch is commanded up, because the current pitch ->
+    /// vertical-speed coupling was never tied to thrust or airspeed in
+    /// the first place (see the module doc). That's the same documented
+    /// simplification as always, just more visible now that idle is a
+    /// starting state instead of only a cruise trim value.
+    pub fn at_gate(elevation_ft: f64, heading_deg: f64) -> Self {
+        Self {
+            altitude_ft: elevation_ft,
+            vertical_speed_fpm: 0.0,
+            heading_deg,
+            pitch_deg: ControlInputs::GATE_TRIM.pitch_target_deg,
+            bank_deg: ControlInputs::GATE_TRIM.bank_target_deg,
+            indicated_airspeed_kt: 0.0,
+            engine: EngineState::new(),
+            trim_reference_pitch_deg: ControlInputs::GATE_TRIM.pitch_target_deg,
         }
     }
 
@@ -71,7 +106,7 @@ impl AircraftState {
         self.engine.integrate(controls.thrust_target_percent, dt_seconds);
 
         self.vertical_speed_fpm =
-            (self.pitch_deg - REFERENCE_LEVEL_PITCH_DEG) * FPM_PER_PITCH_DEGREE;
+            (self.pitch_deg - self.trim_reference_pitch_deg) * FPM_PER_PITCH_DEGREE;
         self.altitude_ft += self.vertical_speed_fpm / 60.0 * dt_seconds;
         // There's no ground/terrain model yet (that's world::airport +
         // a real terrain-awareness issue, not scoped yet) -- but letting
@@ -109,6 +144,46 @@ fn wrap_heading(heading_deg: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gate_state_is_in_equilibrium_under_gate_trim() {
+        let mut state = AircraftState::at_gate(620.0, 90.0);
+        let controls = ControlInputs::GATE_TRIM;
+
+        for _ in 0..100 {
+            state.integrate(&controls, 0.1);
+        }
+
+        assert_eq!(state.altitude_ft, 620.0);
+        assert_eq!(state.indicated_airspeed_kt, 0.0);
+        assert_eq!(state.engine.n1_percent, 0.0);
+    }
+
+    #[test]
+    fn pitching_up_from_the_gate_still_produces_a_climb() {
+        // Regression test for the bug this fix addresses: the zero-VS
+        // reference pitch used to be hardcoded to cruise trim (2.5deg),
+        // so a gate-started aircraft sitting level at 0deg was wrongly
+        // computed as already descending. It must start in equilibrium
+        // (covered above) *and* still respond to a pitch command.
+        let mut state = AircraftState::at_gate(620.0, 90.0);
+        let controls = ControlInputs { pitch_target_deg: 7.5, ..ControlInputs::GATE_TRIM };
+
+        for _ in 0..50 {
+            state.integrate(&controls, 0.1);
+        }
+
+        assert!(state.vertical_speed_fpm > 0.0);
+        assert!(state.altitude_ft > 620.0);
+    }
+
+    #[test]
+    fn at_gate_uses_the_given_elevation_and_heading() {
+        let state = AircraftState::at_gate(1_234.0, 270.0);
+        assert_eq!(state.altitude_ft, 1_234.0);
+        assert_eq!(state.heading_deg, 270.0);
+        assert_eq!(state.indicated_airspeed_kt, 0.0);
+    }
 
     #[test]
     fn cruise_state_is_in_equilibrium_under_default_controls() {

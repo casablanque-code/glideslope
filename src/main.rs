@@ -6,6 +6,7 @@ mod crew;
 mod parser;
 mod sim;
 mod ui;
+mod world;
 
 use app::app::App;
 use crossterm::execute;
