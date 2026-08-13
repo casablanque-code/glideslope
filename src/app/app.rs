@@ -133,6 +133,20 @@ impl App {
                         for line in airport_lines(self.sim.airport()) {
                             self.push_log(line);
                         }
+                    } else if input.trim().eq_ignore_ascii_case("ATC") {
+                        for line in atc_lines(self.sim.atc()) {
+                            self.push_log(line);
+                        }
+                    } else if let Some(name) = strip_word(&input, "REQUEST") {
+                        match crate::atc::constraints::ClearanceType::lookup(name) {
+                            Some(clearance) => {
+                                self.sim.request_clearance(clearance);
+                                self.push_log(format!("ATC: cleared for {}", clearance.name()));
+                            }
+                            None => self.push_log(format!(
+                                "ERROR: unknown clearance '{name}' (try ATC or HELP)"
+                            )),
+                        }
                     } else {
                         match parser::parse(&input) {
                             Ok(command) => {
@@ -218,6 +232,8 @@ fn help_lines() -> Vec<String> {
     lines.push("  CHECK      check off the next pending item yourself".to_string());
     lines.push("  DELEGATE   hand the next pending item to the FO".to_string());
     lines.push("  AIRPORT    show the current airport and runway".to_string());
+    lines.push("  ATC        show clearance status".to_string());
+    lines.push("  REQUEST <name>  request a clearance, e.g. 'REQUEST TAXI'".to_string());
     lines
 }
 
@@ -235,6 +251,29 @@ fn checklist_lines(checklist: &crate::checklist::Checklist) -> Vec<String> {
     lines
 }
 
+/// If `input` starts with `word` (case-insensitive) followed by
+/// whitespace, returns whatever follows, trimmed. Used for the one
+/// pseudo-command that takes an argument (`REQUEST <clearance>`) --
+/// the others are all bare keywords, matched with `eq_ignore_ascii_case`
+/// directly.
+fn strip_word<'a>(input: &'a str, word: &str) -> Option<&'a str> {
+    let trimmed = input.trim();
+    if trimmed.len() <= word.len() {
+        return None; // no room for both the word and an argument
+    }
+    let head = trimmed.get(..word.len())?; // None if word.len() isn't a char boundary
+    let tail = &trimmed[word.len()..];
+    if !head.eq_ignore_ascii_case(word) || !tail.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = tail.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest)
+    }
+}
+
 /// Static facts about the airport -- no clearances, no ATC dialogue
 /// (that's #12's job once it exists). Just what's actually known: name,
 /// identifier, and the one runway.
@@ -248,6 +287,17 @@ fn airport_lines(airport: &crate::world::airport::Airport) -> Vec<String> {
             airport.runway.elevation_ft
         ),
     ]
+}
+
+/// Every clearance type and whether it's been granted. No pending/denied
+/// state to show yet -- see `atc::controller`'s module doc for why.
+fn atc_lines(atc: &crate::atc::controller::Controller) -> Vec<String> {
+    let mut lines = vec!["ATC clearances:".to_string()];
+    for clearance in crate::atc::constraints::ClearanceType::ALL {
+        let status = if atc.is_granted(clearance) { "GRANTED" } else { "not requested" };
+        lines.push(format!("  {:<9} {status}", clearance.name()));
+    }
+    lines
 }
 
 /// Human-readable confirmation shown in the log after a command is
@@ -363,6 +413,61 @@ mod tests {
         let joined = log.iter().cloned().collect::<Vec<_>>().join("\n");
         assert!(joined.contains("Glideslope Regional"));
         assert!(joined.contains("Runway 09"));
+    }
+
+    #[test]
+    fn request_command_grants_a_valid_clearance() {
+        let mut app = App::new();
+        type_str(&mut app, "request taxi");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().any(|entry| entry.contains("TAXI")));
+        drop(log);
+
+        assert!(app.sim.atc().is_granted(crate::atc::constraints::ClearanceType::Taxi));
+    }
+
+    #[test]
+    fn request_command_rejects_an_unknown_clearance() {
+        let mut app = App::new();
+        type_str(&mut app, "request flightlevelchange");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().any(|entry| entry.starts_with("ERROR:")));
+    }
+
+    #[test]
+    fn atc_command_lists_every_clearance_type() {
+        let mut app = App::new();
+        type_str(&mut app, "atc");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        let joined = log.iter().cloned().collect::<Vec<_>>().join("\n");
+        for clearance in crate::atc::constraints::ClearanceType::ALL {
+            assert!(joined.contains(clearance.name()));
+        }
+    }
+
+    #[test]
+    fn strip_word_extracts_the_argument() {
+        assert_eq!(strip_word("REQUEST TAXI", "REQUEST"), Some("TAXI"));
+        assert_eq!(strip_word("  request   taxi  ", "REQUEST"), Some("taxi"));
+    }
+
+    #[test]
+    fn strip_word_rejects_a_word_without_an_argument() {
+        assert_eq!(strip_word("REQUEST", "REQUEST"), None);
+        assert_eq!(strip_word("REQUEST ", "REQUEST"), None);
+    }
+
+    #[test]
+    fn strip_word_does_not_match_a_longer_word_with_the_same_prefix() {
+        // "REQUESTED FOO" must not be treated as "REQUEST"ed with
+        // argument "ED FOO".
+        assert_eq!(strip_word("REQUESTED FOO", "REQUEST"), None);
     }
 
     #[test]

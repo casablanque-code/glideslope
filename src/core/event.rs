@@ -9,6 +9,7 @@
 //! sensors, ...) add variants as those subsystems land — resist the urge
 //! to pre-declare events for systems that don't exist yet.
 
+use crate::atc::constraints::ClearanceType;
 use crate::core::time::SimTime;
 use crate::crew::task::Task;
 
@@ -42,6 +43,15 @@ pub enum Event {
         // panel reads TaskQueue directly rather than this event -- a
         // future debrief/history feature is the likely real consumer.
         task: Task,
+    },
+
+    /// Published when ATC grants a requested clearance. Discrete and
+    /// notable, same as `TaskCompleted` -- not filtered from the log.
+    ClearanceGranted {
+        #[allow(dead_code)]
+        // read via Debug/tracing today (and in tests); the ATC panel/UI
+        // reads Controller state directly rather than this event.
+        clearance: ClearanceType,
     },
 }
 

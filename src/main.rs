@@ -1,5 +1,6 @@
 mod aircraft;
 mod app;
+mod atc;
 mod checklist;
 mod core;
 mod crew;

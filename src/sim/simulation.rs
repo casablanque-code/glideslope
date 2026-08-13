@@ -4,6 +4,8 @@
 
 use crate::aircraft::controls::ControlInputs;
 use crate::aircraft::state::AircraftState;
+use crate::atc::constraints::ClearanceType;
+use crate::atc::controller::{ClearanceState, Controller as AtcController};
 use crate::checklist::landing::landing_checklist;
 use crate::checklist::Checklist;
 use crate::core::command::Command;
@@ -30,11 +32,12 @@ pub struct Simulation {
     timestep: FixedTimestep,
     started: bool,
     aircraft: AircraftState,
-    /// No ATC (#12) or phase machine (#13) writes to this yet -- it
-    /// stays at whatever the starting trim was (`GATE_TRIM` today) until
-    /// a player command (#4) changes it.
+    /// No phase machine (#13) writes to this yet -- it stays at
+    /// whatever the starting trim was (`GATE_TRIM` today) until a
+    /// player command (#4) changes it.
     controls: ControlInputs,
     airport: Airport,
+    atc: AtcController,
     first_officer: FirstOfficer,
     fo_queue: TaskQueue,
     task_ids: IdGenerator,
@@ -63,6 +66,7 @@ impl Simulation {
             ),
             controls: ControlInputs::GATE_TRIM,
             airport,
+            atc: AtcController::new(),
             first_officer: FirstOfficer::default(),
             fo_queue: TaskQueue::new(),
             task_ids: IdGenerator::new(),
@@ -73,6 +77,19 @@ impl Simulation {
 
     pub fn airport(&self) -> &Airport {
         &self.airport
+    }
+
+    pub fn atc(&self) -> &AtcController {
+        &self.atc
+    }
+
+    /// Request a clearance from ATC, publishing `Event::ClearanceGranted`
+    /// when it's (always, for now -- see `atc::controller`'s module doc)
+    /// granted.
+    pub fn request_clearance(&mut self, clearance: ClearanceType) -> ClearanceState {
+        let state = self.atc.request(clearance);
+        self.event_bus.publish(Event::ClearanceGranted { clearance });
+        state
     }
 
     pub fn clock(&self) -> &SimClock {
