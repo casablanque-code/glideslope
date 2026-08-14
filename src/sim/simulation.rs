@@ -9,6 +9,7 @@ use crate::atc::controller::{ClearanceState, Controller as AtcController};
 use crate::checklist::landing::landing_checklist;
 use crate::checklist::Checklist;
 use crate::core::command::Command;
+use crate::core::errors::SimError;
 use crate::core::event::Event;
 use crate::core::event_bus::EventBus;
 use crate::core::ids::{IdGenerator, TaskId};
@@ -17,6 +18,7 @@ use crate::core::time::{SimClock, TICK_DURATION};
 use crate::crew::fo::FirstOfficer;
 use crate::crew::queue::TaskQueue;
 use crate::crew::task::{Task, TaskSource};
+use crate::sim::phase::{FlightPhase, PhaseInputs, PhaseTracker};
 use crate::world::airport::Airport;
 use std::time::Duration;
 
@@ -47,6 +49,7 @@ pub struct Simulation {
     /// "delegate next item" twice before the first finishes would queue
     /// the same item to the FO twice.
     checklist_delegated: Vec<bool>,
+    phase: PhaseTracker,
 }
 
 impl Simulation {
@@ -72,6 +75,7 @@ impl Simulation {
             task_ids: IdGenerator::new(),
             checklist,
             checklist_delegated,
+            phase: PhaseTracker::new(),
         }
     }
 
@@ -90,6 +94,30 @@ impl Simulation {
         let state = self.atc.request(clearance);
         self.event_bus.publish(Event::ClearanceGranted { clearance });
         state
+    }
+
+    pub fn phase(&self) -> FlightPhase {
+        self.phase.current()
+    }
+
+    /// Explicit player command: abandon the approach/landing and climb
+    /// away. See `PhaseTracker::go_around` for when this is valid.
+    pub fn go_around(&mut self) -> Result<FlightPhase, SimError> {
+        let from = self.phase.current();
+        let to = self
+            .phase
+            .go_around(self.aircraft.altitude_ft)
+            .map_err(SimError::PhaseTransitionRejected)?;
+        self.event_bus.publish(Event::PhaseChanged { from, to });
+        Ok(to)
+    }
+
+    /// Explicit player command: shut down after taxiing to the gate.
+    pub fn shutdown(&mut self) -> Result<FlightPhase, SimError> {
+        let from = self.phase.current();
+        let to = self.phase.shutdown().map_err(SimError::PhaseTransitionRejected)?;
+        self.event_bus.publish(Event::PhaseChanged { from, to });
+        Ok(to)
     }
 
     pub fn clock(&self) -> &SimClock {
@@ -184,6 +212,16 @@ impl Simulation {
             }
             self.event_bus.publish(Event::TaskCompleted { task: completed });
         }
+        let phase_inputs = PhaseInputs {
+            altitude_ft: self.aircraft.altitude_ft,
+            runway_elevation_ft: self.airport.runway.elevation_ft,
+            engine_n1_percent: self.aircraft.engine.n1_percent,
+            atc: &self.atc,
+        };
+        let from_phase = self.phase.current();
+        if let Some(to_phase) = self.phase.tick(&phase_inputs) {
+            self.event_bus.publish(Event::PhaseChanged { from: from_phase, to: to_phase });
+        }
         self.event_bus.publish(Event::Tick { at: self.clock.now() });
     }
 
@@ -233,6 +271,46 @@ mod tests {
 
         assert_eq!(sim.clock().tick_count(), 3);
         assert_eq!(*ticks_seen.lock().unwrap(), 3);
+    }
+
+    #[test]
+    fn simulation_starts_on_the_ground() {
+        let sim = Simulation::new();
+        assert_eq!(sim.phase(), FlightPhase::Ground);
+    }
+
+    #[test]
+    fn simulation_advances_ground_to_taxi_when_taxi_clearance_granted() {
+        let mut sim = Simulation::new();
+        sim.request_clearance(ClearanceType::Taxi);
+        sim.tick();
+        assert_eq!(sim.phase(), FlightPhase::Taxi);
+    }
+
+    #[test]
+    fn simulation_publishes_phase_changed_event() {
+        let mut sim = Simulation::new();
+        let changes = Arc::new(Mutex::new(Vec::new()));
+        let changes_clone = Arc::clone(&changes);
+
+        sim.event_bus().subscribe(move |event| {
+            if let Event::PhaseChanged { from, to } = event {
+                changes_clone.lock().unwrap().push((*from, *to));
+            }
+        });
+
+        sim.request_clearance(ClearanceType::Taxi);
+        sim.tick();
+
+        let changes = changes.lock().unwrap();
+        assert_eq!(*changes, vec![(FlightPhase::Ground, FlightPhase::Taxi)]);
+    }
+
+    #[test]
+    fn simulation_go_around_is_rejected_from_the_ground() {
+        let mut sim = Simulation::new();
+        assert!(sim.go_around().is_err());
+        assert_eq!(sim.phase(), FlightPhase::Ground);
     }
 
     #[test]

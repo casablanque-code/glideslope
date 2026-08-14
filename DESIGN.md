@@ -83,8 +83,16 @@ should be a real problem the player discovers, not a blocked keystroke.
 
 ### Open / not yet decided
 
-- Exact criteria for "stabilized approach" (Approach -> Landing) --
-  depends on what's real once ILS (#9) exists.
-- Whether GoAround always re-enters Climb, or can shortcut back into a
-  vectored re-approach without a full climb -- revisit once ATC (#12)
-  exists and holding/vectoring is real.
+- Exact criteria for "stabilized approach" (Approach -> Landing) is
+  still a placeholder: implemented (#13) as a landing clearance plus an
+  altitude margin above the runway (`LANDING_ALTITUDE_MARGIN_FT` in
+  `sim::phase`), not real stabilized-approach criteria. Revisit once
+  ILS (#9) gives a real deviation/glidepath to check against.
+- GoAround always re-enters Climb (#13 decided this): resolved via an
+  altitude-gain check from wherever the go-around began, not a
+  vectored re-approach shortcut. Revisit if holding/vectoring ever
+  becomes real -- a controller-directed re-approach without a full
+  climb might be worth adding then.
+- Holding is still unimplemented, per the original decision above --
+  #13 didn't change this. Needs a traffic or weather system to
+  generate a real reason to hold before it's worth building.

@@ -4,8 +4,10 @@
 //! exercised without a real terminal.
 
 use crate::aircraft::state::AircraftState;
+use crate::atc::controller::Controller as AtcController;
 use crate::core::time::TICKS_PER_SECOND;
 use crate::crew::queue::TaskQueue;
+use crate::sim::phase::FlightPhase;
 use crate::ui::{layout, theme, widgets};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -14,6 +16,8 @@ use ratatui::Frame;
 pub struct ScreenState<'a> {
     pub tick_count: u64,
     pub aircraft: &'a AircraftState,
+    pub phase: FlightPhase,
+    pub atc: &'a AtcController,
     pub fo_queue: &'a TaskQueue,
     pub log_entries: &'a [String],
     pub command_input: &'a str,
@@ -24,9 +28,12 @@ pub fn draw(frame: &mut Frame, state: &ScreenState) {
 
     frame.render_widget(widgets::pfd::widget(state.aircraft), regions.pfd);
     frame.render_widget(engine_panel(state.aircraft), regions.engine);
-    frame.render_widget(aircraft_status_panel(state.tick_count), regions.aircraft_status);
+    frame.render_widget(
+        aircraft_status_panel(state.tick_count, state.phase),
+        regions.aircraft_status,
+    );
 
-    frame.render_widget(atc_panel(), regions.atc);
+    frame.render_widget(atc_panel(state.atc), regions.atc);
     frame.render_widget(weather_panel(), regions.weather);
     frame.render_widget(widgets::fo_queue::widget(state.fo_queue), regions.fo_queue);
 
@@ -58,8 +65,28 @@ fn engine_panel(aircraft: &AircraftState) -> Paragraph<'static> {
     Paragraph::new(line).block(block)
 }
 
-fn atc_panel() -> Paragraph<'static> {
-    widgets::placeholder("ATC", "awaiting ATC constraint generator (issue #TBD)")
+/// Compact view -- just the clearances that have actually been granted,
+/// since the full ALL-clearances-with-status listing (the ATC pseudo-
+/// command's job) would overflow this panel's height quickly.
+fn atc_panel(atc: &AtcController) -> Paragraph<'static> {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border())
+        .title(Span::styled("ATC", theme::title()));
+
+    let granted: Vec<&str> = crate::atc::constraints::ClearanceType::ALL
+        .into_iter()
+        .filter(|clearance| atc.is_granted(*clearance))
+        .map(|clearance| clearance.name())
+        .collect();
+
+    let lines: Vec<Line> = if granted.is_empty() {
+        vec![Line::styled("no clearances granted", theme::placeholder_text())]
+    } else {
+        granted.into_iter().map(|name| Line::raw(format!("cleared: {name}"))).collect()
+    };
+
+    Paragraph::new(lines).block(block)
 }
 
 fn weather_panel() -> Paragraph<'static> {
@@ -69,16 +96,20 @@ fn weather_panel() -> Paragraph<'static> {
 /// This panel is for aircraft configuration/systems summary (gear,
 /// flaps, autobrake, ...) -- none of which exist yet (checklists #8,
 /// failures #10). Flight/attitude data already lives on the PFD, so this
-/// doesn't duplicate it; the one thing it shows today is elapsed sim
-/// time, formatted as clock time rather than a raw tick count, which is
-/// an implementation detail that has no business leaking into the UI.
-fn aircraft_status_panel(tick_count: u64) -> Paragraph<'static> {
+/// doesn't duplicate it; elapsed time is shown as clock time rather than
+/// a raw tick count (an implementation detail with no business in the
+/// UI), and the current flight phase (#13) has a real, live source now.
+fn aircraft_status_panel(tick_count: u64, phase: FlightPhase) -> Paragraph<'static> {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
         .title(Span::styled("AIRCRAFT STATUS", theme::title()));
 
     let lines = vec![
+        Line::from(vec![
+            Span::raw("phase:   "),
+            Span::styled(phase.name(), theme::status_running()),
+        ]),
         Line::from(vec![
             Span::raw("elapsed: "),
             Span::styled(format_elapsed(tick_count), theme::status_running()),
@@ -111,9 +142,12 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let aircraft = AircraftState::cruise();
         let fo_queue = TaskQueue::new();
+        let atc = AtcController::new();
         let state = ScreenState {
             tick_count: 0,
             aircraft: &aircraft,
+            phase: FlightPhase::Ground,
+            atc: &atc,
             fo_queue: &fo_queue,
             log_entries,
             command_input: "",

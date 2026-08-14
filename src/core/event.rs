@@ -12,6 +12,7 @@
 use crate::atc::constraints::ClearanceType;
 use crate::core::time::SimTime;
 use crate::crew::task::Task;
+use crate::sim::phase::FlightPhase;
 
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -52,6 +53,18 @@ pub enum Event {
         // read via Debug/tracing today (and in tests); the ATC panel/UI
         // reads Controller state directly rather than this event.
         clearance: ClearanceType,
+    },
+
+    /// Published whenever the flight phase advances (automatically or
+    /// via an explicit player command like GO AROUND). Discrete and
+    /// notable, same as the others above.
+    PhaseChanged {
+        #[allow(dead_code)]
+        // read via Debug/tracing today; the AIRCRAFT STATUS panel reads
+        // Simulation::phase() directly rather than this event.
+        from: FlightPhase,
+        #[allow(dead_code)]
+        to: FlightPhase,
     },
 }
 

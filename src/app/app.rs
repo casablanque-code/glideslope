@@ -147,6 +147,18 @@ impl App {
                                 "ERROR: unknown clearance '{name}' (try ATC or HELP)"
                             )),
                         }
+                    } else if input.trim().eq_ignore_ascii_case("GO AROUND") {
+                        match self.sim.go_around() {
+                            Ok(phase) => {
+                                self.push_log(format!("OK: going around ({})", phase.name()))
+                            }
+                            Err(err) => self.push_log(format!("ERROR: {err}")),
+                        }
+                    } else if input.trim().eq_ignore_ascii_case("SHUTDOWN") {
+                        match self.sim.shutdown() {
+                            Ok(phase) => self.push_log(format!("OK: shut down ({})", phase.name())),
+                            Err(err) => self.push_log(format!("ERROR: {err}")),
+                        }
                     } else {
                         match parser::parse(&input) {
                             Ok(command) => {
@@ -188,6 +200,8 @@ impl App {
         let state = ScreenState {
             tick_count: self.sim.clock().tick_count(),
             aircraft: self.sim.aircraft(),
+            phase: self.sim.phase(),
+            atc: self.sim.atc(),
             fo_queue: self.sim.fo_queue(),
             log_entries: &log_entries,
             command_input: &self.command_input,
@@ -234,6 +248,9 @@ fn help_lines() -> Vec<String> {
     lines.push("  AIRPORT    show the current airport and runway".to_string());
     lines.push("  ATC        show clearance status".to_string());
     lines.push("  REQUEST <name>  request a clearance, e.g. 'REQUEST TAXI'".to_string());
+    lines.push("  GO AROUND  abandon approach/landing and climb away".to_string());
+    lines.push("  SHUTDOWN   shut down after taxiing to the gate".to_string());
+    lines.push("Current flight phase is shown in AIRCRAFT STATUS.".to_string());
     lines
 }
 
@@ -449,6 +466,26 @@ mod tests {
         for clearance in crate::atc::constraints::ClearanceType::ALL {
             assert!(joined.contains(clearance.name()));
         }
+    }
+
+    #[test]
+    fn go_around_command_is_rejected_from_the_ground() {
+        let mut app = App::new();
+        type_str(&mut app, "go around");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().any(|entry| entry.starts_with("ERROR:")));
+    }
+
+    #[test]
+    fn shutdown_command_is_rejected_before_taxi_to_gate() {
+        let mut app = App::new();
+        type_str(&mut app, "shutdown");
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        let log = app.log.lock().unwrap();
+        assert!(log.iter().any(|entry| entry.starts_with("ERROR:")));
     }
 
     #[test]
